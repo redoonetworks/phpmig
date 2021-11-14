@@ -15,15 +15,13 @@ if (!defined('PHPMIG_VERSION')) {
 }
 
 if (is_file(__DIR__ . '/../vendor/autoload.php')) {
-    require_once __DIR__ . '/../vendor/autoload.php';
+    require_once __DIR__ . '/../vendor/autoload.php'; 
+} else if (is_file(getcwd() . '/vendor/autoload.php')) {
+    require_once getcwd() . '/vendor/autoload.php'; 
 } else if (is_file(__DIR__ . '/../../../autoload.php')) {
     require_once __DIR__ . '/../../../autoload.php';
 } else if (is_file(__DIR__ . '/../autoload.php')) {
     require_once __DIR__ . '/../autoload.php';
-} else if (is_dir(__DIR__ . '/../src/Phpmig')) {
-    require_once __DIR__ . "/../src/Phpmig/autoload.php.dist";
-} else {
-    require_once "Phpmig/autoload.php.dist";
 }
 
 $app = new Phpmig\Console\PhpmigApplication(PHPMIG_VERSION);
