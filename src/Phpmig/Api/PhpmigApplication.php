@@ -29,40 +29,39 @@ class PhpmigApplication
     protected $container;
     protected $output;
     protected $migrations;
-    /**
-     * Collection of MigrationCollections   
-     *
-     * @var MigrationCollection[]
-     */
-    protected $collections;
+
     protected $adapter;
     
     public function __construct(\ArrayAccess $container, OutputInterface $output)
     {
-        $this->collections = [];
         $this->container = $container;
         $this->output = $output;
+
         if (!isset($this->container['phpmig.migrator']))
             $this->container['phpmig.migrator'] = new Migration\Migrator($container['phpmig.adapter'], $this->container, $this->output);
         
         $migrations = array();
 
+        $defaultCollection = new MigrationCollection();
+        $this->container['phpmig.collections'][] = $defaultCollection;
+
         if (isset($this->container['phpmig.migrations'])) {
-            $migrations = $this->container['phpmig.migrations'];
-            foreach ($migrations as &$migration) {
-                $migration = realpath($migration);
-            }
-            unset($migration);
+            $defaultCollection->addMigrations($container['phpmig.migrations']);
         }
+
         if (isset($this->container['phpmig.migrations_path'])) {
             $migrationsPath = realpath($this->container['phpmig.migrations_path']);
-            $migrations = array_merge($migrations, glob($migrationsPath . DIRECTORY_SEPARATOR . '*.php'));
+            
+            $defaultCollection->addPath($migrationsPath);
         }
-        if (isset($this->container['phpmig.collections'])) {
-            $this->collections[] = $this->container['phpmig.collections'];
+
+        foreach ($this->container['phpmig.collections'] as $collection) {
+            $collectionMigrations = $collection->getMigrations();
+
+            $migrations = array_merge($migrations, $collectionMigrations);
         }
         
-        $this->migrations = array_unique($migrations);
+        $this->migrations = $migrations;
         $this->adapter = $container['phpmig.adapter'];
     }
     
@@ -119,6 +118,12 @@ class PhpmigApplication
         $migrations = $this->migrations;
         $versions   = $this->adapter->fetchAll();
 
+        $cleanedVersions = [];
+        foreach ($versions as $index => $version) {
+            preg_match('/([0-9]+)$/', $version, $matches);
+            $cleanedVersions[$index] = $matches[1];
+        }
+
         sort($versions);
 
         $direction = 'up';
@@ -130,13 +135,14 @@ class PhpmigApplication
         if ($direction == 'down') {
             rsort($migrations);
 
-            foreach($migrations as $path) {
+            foreach($migrations as $path => $options) {
                 preg_match('/^[0-9]+/', basename($path), $matches);
                 if (!array_key_exists(0, $matches)) {
                     continue;
                 }
                 
                 $version = $matches[0];
+                $prefixedVersion = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $version;
 
                 if ($version > $from) {
                     continue;
@@ -145,48 +151,26 @@ class PhpmigApplication
                     continue;
                 }
 
-                if (in_array($version, $versions)) {
-                    $to_run[$path] = [
-                        MigrationCollection::OPTION_NAMESPACE => '\\',
-                        MigrationCollection::OPTION_VERSION_PREFIX => '',
-                    ];
+                if (in_array($prefixedVersion, $versions)) {
+                    $to_run[$path] = $options;
                 }
             }
-        }else{
+        } else {
             sort($migrations);
-            foreach($migrations as $path) {
+            foreach($migrations as $path => $options) {
                 preg_match('/^[0-9]+/', basename($path), $matches);
                 if (!array_key_exists(0, $matches)) {
                     continue;
                 }
                 
                 $version = $matches[0];
+                $prefixedVersion = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $version;
 
                 if ($to !== null && ($version > $to)) {
                     continue;
                 }
 
-                if (!in_array($version, $versions)) {
-                    $to_run[$path] = [
-                        MigrationCollection::OPTION_NAMESPACE => '\\',
-                        MigrationCollection::OPTION_VERSION_PREFIX => '',
-                    ];
-                }
-            }
-        }
-
-        foreach($this->collections as $collection) {
-            $migrations = $collection->getMigrations($from, $to);
-            $options = $collection->getOptions();
-
-            foreach($migrations as $path) {
-                preg_match('/^[0-9]+/', basename($path), $matches);
-                if (!array_key_exists(0, $matches)) {
-                    continue;
-                }
-                $version = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $matches[0];
-
-                if (!in_array($version, $versions)) {
+                if (!in_array($prefixedVersion, $versions)) {
                     $to_run[$path] = $options;
                 }
             }
@@ -205,12 +189,13 @@ class PhpmigApplication
     {
         $versions = array();
         $names = array();
-        foreach ($migrations as $path => $collectionOptions) {
+        foreach ($migrations as $path => $options) {
             if (!preg_match('/^[0-9]+/', basename($path), $matches)) {
                 throw new \InvalidArgumentException(sprintf('The file "%s" does not have a valid migration filename', $path));
             }
     
             $version = $matches[0];
+            $prefixedVersion = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $version;
     
             if (isset($versions[$version])) {
                 throw new \InvalidArgumentException(sprintf('Duplicate migration, "%s" has the same version as "%s"', $path, $versions[$version]->getName()));
@@ -221,7 +206,7 @@ class PhpmigApplication
                 $migrationName = substr($migrationName, 0, strpos($migrationName, '.'));
             }
 
-            $class = rtrim($collectionOptions[MigrationCollection::OPTION_NAMESPACE], '\\') . '\\' . $this->migrationToClassName($migrationName);
+            $class = rtrim($options[MigrationCollection::OPTION_NAMESPACE], '\\') . '\\' . $this->migrationToClassName($migrationName);
     
             if (isset($names[$class])) {
                 throw new \InvalidArgumentException(sprintf(
@@ -241,7 +226,7 @@ class PhpmigApplication
                 ));
             }
     
-            $migration = new $class($version);
+            $migration = new $class($prefixedVersion);
     
             if (!($migration instanceof Migration\Migration)) {
                 throw new \InvalidArgumentException(sprintf(
