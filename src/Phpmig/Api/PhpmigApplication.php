@@ -60,7 +60,7 @@ class PhpmigApplication
 
             $migrations = array_merge($migrations, $collectionMigrations);
         }
-        
+
         $this->migrations = $migrations;
         $this->adapter = $container['phpmig.adapter'];
     }
@@ -133,7 +133,7 @@ class PhpmigApplication
 
 
         if ($direction == 'down') {
-            rsort($migrations);
+            krsort($migrations);
 
             foreach($migrations as $path => $options) {
                 preg_match('/^[0-9]+/', basename($path), $matches);
@@ -156,7 +156,8 @@ class PhpmigApplication
                 }
             }
         } else {
-            sort($migrations);
+            ksort($migrations);
+            
             foreach($migrations as $path => $options) {
                 preg_match('/^[0-9]+/', basename($path), $matches);
                 if (!array_key_exists(0, $matches)) {
@@ -189,6 +190,7 @@ class PhpmigApplication
     {
         $versions = array();
         $names = array();
+
         foreach ($migrations as $path => $options) {
             if (!preg_match('/^[0-9]+/', basename($path), $matches)) {
                 throw new \InvalidArgumentException(sprintf('The file "%s" does not have a valid migration filename', $path));
