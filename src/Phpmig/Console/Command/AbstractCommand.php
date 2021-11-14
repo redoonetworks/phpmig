@@ -7,6 +7,7 @@ namespace Phpmig\Console\Command;
 
 use Phpmig\Adapter\AdapterInterface;
 use Phpmig\Migration\Migration;
+use Phpmig\Migration\MigrationCollection;
 use Phpmig\Migration\Migrator;
 use Symfony\Component\Config\FileLocator;
 use Symfony\Component\Console\Command\Command;
@@ -177,49 +178,68 @@ abstract class AbstractCommand extends Command
             throw new \RuntimeException($this->getBootstrap() . ' must return container with array at phpmig.migrations or migrations default path at phpmig.migrations_path or migrations default path at phpmig.sets');
         }
 
+        $defaultCollection = new MigrationCollection();
+        $this->container['phpmig.collections'][] = $defaultCollection;
+
+        /**
+         * array('path' => ['options'], 'path2' => ['options'])
+         */
         $migrations = array();
+
         if (isset($container['phpmig.migrations'])) {
             if (!is_array($container['phpmig.migrations'])) {
                 throw new \RuntimeException($this->getBootstrap() . ' phpmig.migrations must be an array.');
             }
 
-            $migrations = $container['phpmig.migrations'];
+            $defaultCollection->addMigrations($container['phpmig.migrations']);
         }
+
         if (isset($container['phpmig.migrations_path'])) {
             if (!is_dir($container['phpmig.migrations_path'])) {
                 throw new \RuntimeException($this->getBootstrap() . ' phpmig.migrations_path must be a directory.');
             }
 
             $migrationsPath = realpath($container['phpmig.migrations_path']);
-            $migrations = array_merge($migrations, glob($migrationsPath . DIRECTORY_SEPARATOR . '*.php'));
+
+            $defaultCollection->addPath($migrationsPath);
         }
+
         if (isset($container['phpmig.sets']) && isset($container['phpmig.sets'][$set]['migrations_path'])) {
             if (!is_dir($container['phpmig.sets'][$set]['migrations_path'])) {
                 throw new \RuntimeException($this->getBootstrap() . " ['phpmig.sets']['" . $set . "']['migrations_path'] must be a directory.");
             }
 
             $migrationsPath = realpath($container['phpmig.sets'][$set]['migrations_path']);
-            $migrations = array_merge($migrations, glob($migrationsPath . DIRECTORY_SEPARATOR . '*.php'));
+
+            $defaultCollection->addPath($migrationsPath);
         }
-        $migrations = array_unique($migrations);
+
+        foreach($this->container['phpmig.collections'] as $collection) {
+            $collectionMigrations = $collection->getMigrations();
+            $options = $collection->getOptions();
+
+            $migrations = array_merge($migrations, $collectionMigrations);
+        }
 
         $versions = array();
         $names = array();
-        foreach ($migrations as $path) {
+        foreach ($migrations as $path => $options) {
             if (!preg_match('/^[0-9]+/', basename($path), $matches)) {
                 throw new \InvalidArgumentException(sprintf('The file "%s" does not have a valid migration filename', $path));
             }
 
             $version = $matches[0];
-            if (isset($versions[$version])) {
-                throw new \InvalidArgumentException(sprintf('Duplicate migration, "%s" has the same version as "%s"', $path, $versions[$version]->getName()));
+            $prefixedVersion = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $version;
+
+            if (isset($versions[$prefixedVersion])) {
+                throw new \InvalidArgumentException(sprintf('Duplicate migration, "%s" has the same version as "%s"', $path, $versions[$prefixedVersion]->getName()));
             }
 
             $migrationName = preg_replace('/^[0-9]+_/', '', basename($path));
             if (false !== strpos($migrationName, '.')) {
                 $migrationName = substr($migrationName, 0, strpos($migrationName, '.'));
             }
-            $class = $this->migrationToClassName($migrationName);
+            $class = rtrim($options[MigrationCollection::OPTION_NAMESPACE], '\\') . '\\' . $this->migrationToClassName($migrationName);
 
             if ($this instanceof GenerateCommand
                 && $class == $this->migrationToClassName($input->getArgument('name'))) {
@@ -247,7 +267,7 @@ abstract class AbstractCommand extends Command
                 ));
             }
 
-            $migration = new $class($version);
+            $migration = new $class($prefixedVersion);
 
             if (!($migration instanceof Migration)) {
                 throw new \InvalidArgumentException(sprintf(
@@ -259,7 +279,7 @@ abstract class AbstractCommand extends Command
 
             $migration->setOutput($output); // inject output
 
-            $versions[$version] = $migration;
+            $versions[$prefixedVersion] = $migration;
         }
 
         if (isset($container['phpmig.sets']) && isset($container['phpmig.sets'][$set]['connection'])) {

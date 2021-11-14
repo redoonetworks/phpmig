@@ -55,20 +55,26 @@ EOT
         $migrations = $this->getMigrations();
         $versions   = $this->getAdapter()->fetchAll();
 
+        $cleanedVersions = [];
+        foreach ($versions as $index => $version) {
+            preg_match('/([0-9]+)$/', $version, $matches);
+            $cleanedVersions[$index] = $matches[1];
+        }
+
         $version = $input->getOption('target');
 
         ksort($migrations);
-        sort($versions);
+        sort($cleanedVersions);
 
-        if (!empty($versions)) {
+        if (!empty($cleanedVersions)) {
             // Get the last run migration number
-            $current = end($versions);
+            $current = end($cleanedVersions);
         } else {
             $current = 0;
         }
 
         if (null !== $version) {
-            if (0 != $version && !isset($migrations[$version])) {
+            if (0 != $version && !isset($migrations[$cleanedVersions])) {
                 return 0;
             }
         } else {
@@ -78,7 +84,7 @@ EOT
                 return 0;
             }
 
-            $version = max($versionNumbers);
+            $version = max($cleanedVersions);
         }
 
         $direction = $version > $current ? 'up' : 'down';
@@ -89,7 +95,7 @@ EOT
              */
             krsort($migrations);
             foreach($migrations as $migration) {
-                if ($migration->getVersion() <= $version) {
+                if ($migration->getDecimalVersion() <= $version) {
                     break;
                 }
 
@@ -102,8 +108,8 @@ EOT
 
         ksort($migrations);
         foreach($migrations as $migration) {
-            if ($migration->getVersion() > $version) {
-                break;
+            if ($migration->getDecimalVersion() > $version) {
+                continue;
             }
 
             if (!in_array($migration->getVersion(), $versions)) {

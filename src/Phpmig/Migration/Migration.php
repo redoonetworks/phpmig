@@ -97,6 +97,18 @@ class Migration
     }
 
     /**
+     * Get decimal Version
+     *
+     * @return int
+     */
+    public function getDecimalVersion()
+    {
+        preg_match('/([0-9]+)$/', $this->version, $matches);
+        
+        return $matches[1];
+    }
+
+    /**
      * Set version
      *
      * @param int $version

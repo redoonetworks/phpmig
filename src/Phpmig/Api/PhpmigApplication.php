@@ -6,6 +6,7 @@
 namespace Phpmig\Api;
 
 use Phpmig\Migration;
+use Phpmig\Migration\MigrationCollection;
 use RuntimeException;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -28,16 +29,24 @@ class PhpmigApplication
     protected $container;
     protected $output;
     protected $migrations;
+    /**
+     * Collection of MigrationCollections   
+     *
+     * @var MigrationCollection[]
+     */
+    protected $collections;
     protected $adapter;
     
     public function __construct(\ArrayAccess $container, OutputInterface $output)
     {
+        $this->collections = [];
         $this->container = $container;
         $this->output = $output;
         if (!isset($this->container['phpmig.migrator']))
             $this->container['phpmig.migrator'] = new Migration\Migrator($container['phpmig.adapter'], $this->container, $this->output);
         
         $migrations = array();
+
         if (isset($this->container['phpmig.migrations'])) {
             $migrations = $this->container['phpmig.migrations'];
             foreach ($migrations as &$migration) {
@@ -48,6 +57,9 @@ class PhpmigApplication
         if (isset($this->container['phpmig.migrations_path'])) {
             $migrationsPath = realpath($this->container['phpmig.migrations_path']);
             $migrations = array_merge($migrations, glob($migrationsPath . DIRECTORY_SEPARATOR . '*.php'));
+        }
+        if (isset($this->container['phpmig.collections'])) {
+            $this->collections[] = $this->container['phpmig.collections'];
         }
         
         $this->migrations = array_unique($migrations);
@@ -134,7 +146,10 @@ class PhpmigApplication
                 }
 
                 if (in_array($version, $versions)) {
-                    $to_run[] = $path;
+                    $to_run[$path] = [
+                        MigrationCollection::OPTION_NAMESPACE => '\\',
+                        MigrationCollection::OPTION_VERSION_PREFIX => '',
+                    ];
                 }
             }
         }else{
@@ -152,10 +167,29 @@ class PhpmigApplication
                 }
 
                 if (!in_array($version, $versions)) {
-                    $to_run[] = $path;
+                    $to_run[$path] = [
+                        MigrationCollection::OPTION_NAMESPACE => '\\',
+                        MigrationCollection::OPTION_VERSION_PREFIX => '',
+                    ];
                 }
             }
+        }
 
+        foreach($this->collections as $collection) {
+            $migrations = $collection->getMigrations($from, $to);
+            $options = $collection->getOptions();
+
+            foreach($migrations as $path) {
+                preg_match('/^[0-9]+/', basename($path), $matches);
+                if (!array_key_exists(0, $matches)) {
+                    continue;
+                }
+                $version = $options[MigrationCollection::OPTION_VERSION_PREFIX] . $matches[0];
+
+                if (!in_array($version, $versions)) {
+                    $to_run[$path] = $options;
+                }
+            }
         }
 
         return $this->loadMigrations($to_run);
@@ -171,7 +205,7 @@ class PhpmigApplication
     {
         $versions = array();
         $names = array();
-        foreach ($migrations as $path) {
+        foreach ($migrations as $path => $collectionOptions) {
             if (!preg_match('/^[0-9]+/', basename($path), $matches)) {
                 throw new \InvalidArgumentException(sprintf('The file "%s" does not have a valid migration filename', $path));
             }
@@ -186,7 +220,8 @@ class PhpmigApplication
             if (false !== strpos($migrationName, '.')) {
                 $migrationName = substr($migrationName, 0, strpos($migrationName, '.'));
             }
-            $class = $this->migrationToClassName($migrationName);
+
+            $class = rtrim($collectionOptions[MigrationCollection::OPTION_NAMESPACE], '\\') . '\\' . $this->migrationToClassName($migrationName);
     
             if (isset($names[$class])) {
                 throw new \InvalidArgumentException(sprintf(
