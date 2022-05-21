@@ -1,8 +1,9 @@
 Phpmig
 ======
 
-[![Build
-Status](https://travis-ci.org/davedevelopment/phpmig.png)](https://travis-ci.org/davedevelopment/phpmig)
+> **Note**
+> This is a fork of currently unmaintened phpmig repository: https://github.com/davedevelopment/phpmig  
+> All credits of these helpfull library goes to [Dave Marshall](https://github.com/davedevelopment) 
 
 What is it?
 -----------
