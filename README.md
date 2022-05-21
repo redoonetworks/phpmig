@@ -1,8 +1,9 @@
 Phpmig
 ======
 
-[![Build
-Status](https://travis-ci.org/davedevelopment/phpmig.png)](https://travis-ci.org/davedevelopment/phpmig)
+> **Note**
+> This is a fork of currently unmaintened phpmig repository: https://github.com/davedevelopment/phpmig  
+> All credits of these helpfull library goes to [Dave Marshall](https://github.com/davedevelopment) 
 
 What is it?
 -----------
@@ -115,6 +116,62 @@ $container['phpmig.adapter'] = function ($c) {
 $container['phpmig.migrations_path'] = __DIR__ . DIRECTORY_SEPARATOR . 'migrations';
 
 return $container;
+
+```
+
+Multiple migration paths
+------------------------
+
+In applications, which are build of multiple projects/packages, multiple parallel migration paths are helpfull to prevent duplicate migration names.  
+To implement this, the configuration `$container['phpmig.collections']` was added, which can be filled with MigrationColleciton objects.  
+Together with this the implementation of Namespaces was needed, to separate migrations.
+
+```php
+$container['phpmig.collections'] = [];
+
+$collection = new  \Phpmig\Migration\MigrationCollection([
+    \Phpmig\Migration\MigrationCollection::OPTION_NAMESPACE => 'PackageName1\\Migrations',
+    \Phpmig\Migration\MigrationCollection::OPTION_VERSION_PREFIX => 'packagename1-',
+]);
+$collection->addPath(__DIR__ . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'package1' . DIRECTORY_SEPARATOR . 'migrations');
+
+$container['phpmig.collections'][] = $collection;
+
+$collection = new  \Phpmig\Migration\MigrationCollection([
+    \Phpmig\Migration\MigrationCollection::OPTION_NAMESPACE => 'PackageName2\\Migrations',
+    \Phpmig\Migration\MigrationCollection::OPTION_VERSION_PREFIX => 'packagename2-',
+]);
+$collection->addPath(__DIR__ . DIRECTORY_SEPARATOR . 'vendor' . DIRECTORY_SEPARATOR . 'package2' . DIRECTORY_SEPARATOR . 'migrations');
+
+$container['phpmig.collections'][] = $collection;
+```
+
+**Use case**
+
+Our usecase for this is to scan all composer dependencies for a individual package type and push all packages with this type into single collections.  
+In this example the namespace of package is defined within extra object of composer.json
+
+```php
+$modules = array_unique(\Composer\InstalledVersions::getInstalledPackagesByType('apimodule'));
+
+$container['phpmig.collections'] = [];
+
+foreach ($modules as $module) {
+    $path = realpath(\Composer\InstalledVersions::getInstallPath($module));
+
+    if (is_dir($path . DIRECTORY_SEPARATOR . 'migrations')) {
+        $composerContent = json_decode(file_get_contents($path . DIRECTORY_SEPARATOR . 'composer.json'), true);
+        
+        $collection = new  \Phpmig\Migration\MigrationCollection([
+            \Phpmig\Migration\MigrationCollection::OPTION_NAMESPACE => rtrim($composerContent['extra']['namespace'], '\\') . '\\Migrations',
+            \Phpmig\Migration\MigrationCollection::OPTION_VERSION_PREFIX => $composerContent['name'] . '-',
+        ]);
+        
+        $collection->addPath($path . DIRECTORY_SEPARATOR . 'migrations');
+
+        $container['phpmig.collections'][] = $collection;
+    }
+}
 
 ```
 
